@@ -37,19 +37,29 @@ pub fn generate_round_robin(mut players: Vec<Player>) {
             let b = n - 1 - i;
 
             if players[a].name == BYE {
-                println!("{}{} {} gets a break", YELLOW, players[b].name, RESET);
+                println!("{}{}{} gets a break", YELLOW, players[b].name, RESET);
                 opponents[b].push(usize::MAX);
                 continue;
             }
             if players[b].name == BYE {
-                println!("{}{} {} gets a break", YELLOW, players[a].name, RESET);
+                println!("{}{}{} gets a break", YELLOW, players[a].name, RESET);
                 opponents[a].push(usize::MAX);
                 continue;
             }
 
             let (w, bl) = assign_colors(&players, a, b);
-            println!("{}Board {}:{} {}{} (W){} vs {}{} (B){}",
-                GREEN, board, RESET, BOLD, players[w].name, RESET, players[bl].name, ORANGE, RESET);
+            println!(
+                "{}Board {}:{} {}{} (W){} vs {}{} (B){}",
+                GREEN,
+                board,
+                RESET,
+                BOLD,
+                players[w].name,
+                RESET,
+                ORANGE,
+                players[bl].name,
+                RESET
+            );
 
             // record color history
             players[w].whites += 1;
@@ -126,11 +136,21 @@ fn display_scoreboard(players: &[Player], original_count: usize) {
     let games = original_count - 1;
     println!("\n{}{}{}", BOLD, GREEN, "\n=== FINAL STANDINGS ===");
     println!("{}({} games per player - Round Robin)", RESET, games);
-    println!("Rank | Player{:<15} | Points | Buchholz | W D L", "");
+
+    // Column widths are chosen to match the row formatting below
+    println!("Rank | {:<20} | {:>6} | {:>7} | {}", "Player", "Points", "Buchholz", "W D L");
     println!("{}", "─".repeat(72));
     for (i, p) in list.iter().enumerate() {
-        println!("{:2}. | {:<20} | {:5.1} | {:6.1} | {} {} {}",
-            i + 1, p.name, p.points(), p.buchholz, p.wins, p.draws, p.losses);
+        println!(
+            "{:2}. | {:<20} | {:6.1} | {:7.1} | {} {} {}",
+            i + 1,
+            p.name,
+            p.points(),
+            p.buchholz,
+            p.wins,
+            p.draws,
+            p.losses
+        );
     }
     println!("{}", "─".repeat(72));
 }
