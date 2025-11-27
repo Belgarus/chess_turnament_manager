@@ -1,142 +1,136 @@
 use crate::player::Player;
 use std::io::{self, Write};
 
+// ANSI color constants (kept small and readable)
 const BOLD: &str = "\x1b[1m";
 const GREEN: &str = "\x1b[32m";
 const ORANGE: &str = "\x1b[38;5;208m";
 const YELLOW: &str = "\x1b[33m";
 const RESET: &str = "\x1b[0m";
-const BYE_PLAYER: &str = "<bye>";
+const BYE: &str = "<bye>";
 
+/// Generate a Berger-style round-robin, prompt for results, then show standings.
+///
+/// This implementation is compact and avoids unnecessary clones and allocations.
 pub fn generate_round_robin(mut players: Vec<Player>) {
     let original_count = players.len();
-    let has_bye = original_count % 2 == 1;
-    
-    if has_bye {
-        players.push(Player::new(BYE_PLAYER.to_string(), None));
+    let odd = original_count % 2 == 1;
+
+    if odd {
+        players.push(Player::new(BYE.to_string(), None));
     }
-    
-    println!("{}Enter results: 1=white wins, 0=draw, -1=black wins{}\n", BOLD, RESET);
-    
+
     let n = players.len();
-    let mut opponent_scores: Vec<Vec<f32>> = vec![vec![]; n];
-    
+
+    // Track opponents by index; use usize::MAX to mark a bye opponent
+    let mut opponents: Vec<Vec<usize>> = vec![Vec::new(); n];
+
+    println!("{}Enter results: 1=white, 0=draw, -1=black{}\n", BOLD, RESET);
+
     for round in 0..n - 1 {
-        println!("{}{}{}{}", BOLD, ORANGE, format!("Round {}:", round + 1), RESET);
-        let mut matches = Vec::new();
+        println!("{}{}Round {}:{}", BOLD, ORANGE, round + 1, RESET);
         let mut board = 1;
-        
-        for i in 0..n / 2 {
-            let (idx1, idx2) = (i, n - 1 - i);
-            
-            if is_bye(players[idx1].name.as_str()) {
-                println!("{}{}{} {} gets a break", YELLOW, "●", RESET, players[idx2].name);
-                opponent_scores[idx2].push(0.5);
-            } else if is_bye(players[idx2].name.as_str()) {
-                println!("{}{}{} {} gets a break", YELLOW, "●", RESET, players[idx1].name);
-                opponent_scores[idx1].push(0.5);
-            } else {
-                let (white_idx, black_idx) = assign_colors(&players, idx1, idx2);
-                println!(
-                    "{}Board {}: {}{} (W){} vs {}{} (B){}",
-                    GREEN, board, BOLD, players[white_idx].name, RESET,
-                    players[black_idx].name, ORANGE, RESET
-                );
-                players[white_idx].whites += 1;
-                players[black_idx].blacks += 1;
-                matches.push((white_idx, black_idx));
-                board += 1;
+        let mut round_pairs: Vec<(usize, usize)> = Vec::new();
+
+        for i in 0..(n / 2) {
+            let a = i;
+            let b = n - 1 - i;
+
+            if players[a].name == BYE {
+                println!("{}{} {} gets a break", YELLOW, players[b].name, RESET);
+                opponents[b].push(usize::MAX);
+                continue;
             }
+            if players[b].name == BYE {
+                println!("{}{} {} gets a break", YELLOW, players[a].name, RESET);
+                opponents[a].push(usize::MAX);
+                continue;
+            }
+
+            let (w, bl) = assign_colors(&players, a, b);
+            println!("{}Board {}:{} {}{} (W){} vs {}{} (B){}",
+                GREEN, board, RESET, BOLD, players[w].name, RESET, players[bl].name, ORANGE, RESET);
+
+            // record color history
+            players[w].whites += 1;
+            players[bl].blacks += 1;
+
+            // record opponents for buchholz calculation later
+            opponents[w].push(bl);
+            opponents[bl].push(w);
+
+            round_pairs.push((w, bl));
+            board += 1;
         }
-        
-        for (white_idx, black_idx) in &matches {
-            print!("Result for {} vs {} (1/0/-1): ", players[*white_idx].name, players[*black_idx].name);
-            io::stdout().flush().unwrap();
-            
-            let mut input = String::new();
-            io::stdin().read_line(&mut input).unwrap();
-            
-            process_result(&mut players, &mut opponent_scores, *white_idx, *black_idx, input.trim());
+
+        // Prompt for results for this round's matches
+        for &(w, bl) in &round_pairs {
+            prompt_and_record_result(&mut players, w, bl);
         }
-        
+
+        // rotate (circle method)
         if round < n - 2 {
             let last = players.pop().unwrap();
             players.insert(1, last);
+            // keep opponents vector in sync with players rotation
+            let last_ops = opponents.pop().unwrap();
+            opponents.insert(1, last_ops);
         }
     }
-    
-    for (i, player) in players.iter_mut().enumerate() {
-        if !is_bye(player.name.as_str()) {
-            player.buchholz = opponent_scores[i].iter().sum();
-        }
+
+    // Calculate Buchholz: sum of opponents' final points (bye counts as 0.5)
+    for i in 0..n {
+        if players[i].name == BYE { continue; }
+        let sum: f32 = opponents[i]
+            .iter()
+            .map(|&opp| if opp == usize::MAX { 0.5 } else { players[opp].points() })
+            .sum();
+        players[i].buchholz = sum;
     }
-    
+
     display_scoreboard(&players, original_count);
 }
 
-fn is_bye(name: &str) -> bool {
-    name == BYE_PLAYER
+fn assign_colors(players: &[Player], i: usize, j: usize) -> (usize, usize) {
+    // Prefer the player with fewer whites to take white; tie-break by fewer blacks
+    let p1 = &players[i];
+    let p2 = &players[j];
+    if p1.whites < p2.whites { (i, j) }
+    else if p2.whites < p1.whites { (j, i) }
+    else if p1.blacks < p2.blacks { (i, j) }
+    else { (j, i) }
 }
 
-fn assign_colors(players: &[Player], idx1: usize, idx2: usize) -> (usize, usize) {
-    let (w1, w2, b1, b2) = (players[idx1].whites, players[idx2].whites, players[idx1].blacks, players[idx2].blacks);
-    
-    if w1 > w2 {
-        (idx2, idx1)
-    } else if w2 > w1 {
-        (idx1, idx2)
-    } else if b1 > b2 {
-        (idx1, idx2)
-    } else {
-        (idx2, idx1)
+fn prompt_and_record_result(players: &mut [Player], white: usize, black: usize) {
+    print!("Result for {} vs {} (1/0/-1): ", players[white].name, players[black].name);
+    io::stdout().flush().ok();
+
+    let mut buf = String::new();
+    io::stdin().read_line(&mut buf).ok();
+    match buf.trim().parse::<i32>() {
+        Ok(1) => players[white].wins += 1,
+        Ok(-1) => players[black].wins += 1,
+        _ => { players[white].draws += 1; players[black].draws += 1; }
     }
-}
-
-fn process_result(players: &mut [Player], opponent_scores: &mut [Vec<f32>], white_idx: usize, black_idx: usize, input: &str) {
-    let (white_points, black_points) = match input.parse::<i32>() {
-        Ok(1) => {
-            players[white_idx].wins += 1;
-            (players[black_idx].points(), players[white_idx].points())
-        }
-        Ok(-1) => {
-            players[black_idx].wins += 1;
-            (players[black_idx].points(), players[white_idx].points())
-        }
-        _ => {
-            players[white_idx].draws += 1;
-            players[black_idx].draws += 1;
-            (players[black_idx].points(), players[white_idx].points())
-        }
-    };
-    
-    opponent_scores[white_idx].push(white_points);
-    opponent_scores[black_idx].push(black_points);
 }
 
 fn display_scoreboard(players: &[Player], original_count: usize) {
-    let mut scores: Vec<_> = players.iter().filter(|p| !is_bye(p.name.as_str())).collect();
-    
-    scores.sort_by(|a, b| {
+    let mut list: Vec<&Player> = players.iter().filter(|p| p.name != BYE).collect();
+    list.sort_by(|a, b| {
         b.points()
-            .partial_cmp(&a.points())
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| b.buchholz.partial_cmp(&a.buchholz).unwrap_or(std::cmp::Ordering::Equal))
+            .partial_cmp(&a.points()).unwrap()
+            .then_with(|| b.buchholz.partial_cmp(&a.buchholz).unwrap())
             .then_with(|| b.wins.cmp(&a.wins))
     });
-    
+
     let games = original_count - 1;
     println!("\n{}{}{}", BOLD, GREEN, "\n=== FINAL STANDINGS ===");
     println!("{}({} games per player - Round Robin)", RESET, games);
-    println!("{}Rank | Player{:<15} | Points | Buchholz | W  D  L{}", RESET, "", "");
-    println!("{}{}", GREEN, "─".repeat(72));
-    
-    for (rank, player) in scores.iter().enumerate() {
-        println!(
-            "{}{}  {:2}. | {:<20} | {:5.1} | {:8.1} | {} {} {} {}",
-            ORANGE, RESET, rank + 1, player.name, player.points(), player.buchholz,
-            player.wins, player.draws, player.losses, RESET
-        );
+    println!("Rank | Player{:<15} | Points | Buchholz | W D L", "");
+    println!("{}", "─".repeat(72));
+    for (i, p) in list.iter().enumerate() {
+        println!("{:2}. | {:<20} | {:5.1} | {:6.1} | {} {} {}",
+            i + 1, p.name, p.points(), p.buchholz, p.wins, p.draws, p.losses);
     }
-    
-    println!("{}{}{}\n{}Tiebreaker: Points → Buchholz → Wins{}\n", GREEN, "─".repeat(72), RESET, BOLD, RESET);
+    println!("{}", "─".repeat(72));
 }
