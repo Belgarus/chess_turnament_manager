@@ -1,0 +1,1 @@
+/mnt/c/Users/10145000/Documents/chess_turnament_manager/target/release/chess_turnament_manager: /mnt/c/Users/10145000/Documents/chess_turnament_manager/src/lib.rs /mnt/c/Users/10145000/Documents/chess_turnament_manager/src/main.rs /mnt/c/Users/10145000/Documents/chess_turnament_manager/src/player.rs /mnt/c/Users/10145000/Documents/chess_turnament_manager/src/schedule.rs
